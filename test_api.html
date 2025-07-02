@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>API Test</h1>
+    <button onclick="testAPI()">Test API</button>
+    <div id="result"></div>
+
+    <script>
+        async function testAPI() {
+            try {
+                const response = await fetch('http://127.0.0.1:8000/api/transactions/');
+                const data = await response.json();
+                
+                document.getElementById('result').innerHTML = `
+                    <h3>API Response:</h3>
+                    <p>Total transactions: ${data.length}</p>
+                    <h4>First 3 transactions:</h4>
+                    <pre>${JSON.stringify(data.slice(0, 3), null, 2)}</pre>
+                    <h4>Voucher numbers check:</h4>
+                    <ul>
+                        ${data.slice(0, 5).map((tx, i) => 
+                            `<li>Transaction ${i+1}: voucher_number = "${tx.voucher_number}"</li>`
+                        ).join('')}
+                    </ul>
+                `;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <h3>Error:</h3>
+                    <p>${error.message}</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html> 
