@@ -4,13 +4,31 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.db.models import Sum, Count, Max
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 import pandas as pd
 import io
 from .models import Transaction
 from .serializers import TransactionSerializer, TransactionListSerializer
 from datetime import datetime
 import re
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from django.db import models
+import os
+from django.conf import settings
+import json
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from io import BytesIO
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from django.db import models
+import os
+from django.conf import settings
+from django.utils import timezone
 
 # Create your views here.
 
@@ -121,6 +139,7 @@ class FileUploadView(APIView):
             # --- Prepare to continue serial numbers from DB for each FY ---
             existing_max_serial = {}
             fy_counters = {}
+            batch_uploaded_at = timezone.now()
 
             for index, row in df.iterrows():
                 try:
@@ -207,29 +226,33 @@ class FileUploadView(APIView):
                         fy_end = year
                     fy_string = f"{str(fy_start)[-2:]}-{str(fy_end)[-2:]}"
 
-                    # Get max serial for this FY from DB if not already cached
-                    if fy_string not in existing_max_serial:
+                    # Get month abbreviation
+                    month_abbr = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month-1]
+
+                    # Get max serial for this FY+month from DB if not already cached
+                    fy_month_key = f"{fy_string}_{month_abbr}"
+                    if fy_month_key not in existing_max_serial:
                         last_voucher = (
                             Transaction.objects
-                            .filter(voucher_number__startswith=f"V/{fy_string}/")
+                            .filter(voucher_number__startswith=f"V/{fy_string}/{month_abbr}/")
                             .order_by('-voucher_number')
                             .first()
                         )
                         if last_voucher:
-                            m = re.match(r"V/\d{2}-\d{2}/(\d+)", last_voucher.voucher_number)
+                            m = re.match(r"V/\d{2}-\d{2}/[A-Za-z]{3}/(\d+)", last_voucher.voucher_number)
                             if m:
                                 last_serial = int(m.group(1))
                             else:
                                 last_serial = 0
                         else:
                             last_serial = 0
-                        existing_max_serial[fy_string] = last_serial
+                        existing_max_serial[fy_month_key] = last_serial
                     # Increment for this upload
-                    if fy_string not in fy_counters:
-                        fy_counters[fy_string] = existing_max_serial[fy_string]
-                    fy_counters[fy_string] += 1
-                    serial = fy_counters[fy_string]
-                    voucher_number = f"V/{fy_string}/{str(serial).zfill(2)}"
+                    if fy_month_key not in fy_counters:
+                        fy_counters[fy_month_key] = existing_max_serial[fy_month_key]
+                    fy_counters[fy_month_key] += 1
+                    serial = fy_counters[fy_month_key]
+                    voucher_number = f"V/{fy_string}/{month_abbr}/{str(serial).zfill(2)}"
                     
                     # Create transaction
                     transaction = Transaction.objects.create(
@@ -241,7 +264,8 @@ class FileUploadView(APIView):
                         voucher_number=voucher_number,
                         from_party=from_party,
                         to_party=to_party,
-                        reference_number=reference_number
+                        reference_number=reference_number,
+                        uploaded_at=batch_uploaded_at
                     )
                     created_count += 1
                     
@@ -252,7 +276,8 @@ class FileUploadView(APIView):
                 'message': f'Success! {created_count} transactions uploaded. {skipped_count} duplicates skipped. Errors: {", ".join(errors)}' if errors else f'Success! {created_count} transactions uploaded. {skipped_count} duplicates skipped.',
                 'created_count': created_count,
                 'skipped_count': skipped_count,
-                'errors': errors
+                'errors': errors,
+                'uploaded_at': batch_uploaded_at.isoformat()
             }, status=201)
             
         except Exception as e:
@@ -347,3 +372,528 @@ def analytics_view(request):
         
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# Keep the existing upload_file function for backward compatibility
+@csrf_exempt
+@require_http_methods(["POST"])
+def upload_file(request):
+    try:
+        if 'file' not in request.FILES:
+            return JsonResponse({'error': 'No file uploaded'}, status=400)
+        file = request.FILES['file']
+        # Check file extension
+        if not file.name.endswith(('.xlsx', '.xls', '.csv')):
+            return JsonResponse({'error': 'Please upload Excel or CSV file'}, status=400)
+        # Read the file
+        if file.name.endswith('.csv'):
+            df = pd.read_csv(file)
+        else:
+            df = pd.read_excel(file)
+        # Lowercase columns for robust detection
+        lower_cols = [str(col).strip().lower() for col in df.columns]
+        # RELF/bank format detection: look for any of these columns
+        relf_cols = [
+            'txn date', 'transaction date', 'value date', 'description', 'ref no./cheque no.',
+            'debit', 'credit', 'balance', 'branch code', 'branch'
+        ]
+        is_relf_format = any(any(relf_col in col for col in lower_cols) for relf_col in relf_cols)
+        if is_relf_format:
+            print("Detected RELF/bank statement format")
+            return process_relf_data(df)
+        else:
+            return process_standard_data(df)
+    except Exception as e:
+        return JsonResponse({'error': f'Error processing file: {str(e)}'}, status=500)
+
+def process_relf_data(df):
+    """Process RELF account data format with robust column mapping and duplicate prevention"""
+    try:
+        import re
+        # Clean the data - remove rows with all NaN values
+        df = df.dropna(how='all')
+
+        # Flexible column mapping
+        col_map = {
+            'txn_date': ['txn date', 'transaction date', 'date'],
+            'value_date': ['value date'],
+            'description': ['description', 'narration', 'particulars'],
+            'ref_no': ['ref no./cheque no.', 'ref no', 'cheque no', 'reference', 'reference number'],
+            'branch_code': ['branch code', 'branch'],
+            'debit': ['debit', 'withdrawal', 'withdrawals'],
+            'credit': ['credit', 'deposit', 'deposits'],
+            'balance': ['balance', 'closing balance', 'running balance'],
+        }
+        # Lowercase columns for matching
+        df.columns = [str(col).strip().lower() for col in df.columns]
+        # Build a mapping from standard name to actual column name
+        actual_cols = {}
+        for std, options in col_map.items():
+            for opt in options:
+                for col in df.columns:
+                    if re.sub(r'[^a-z]', '', col) == re.sub(r'[^a-z]', '', opt):
+                        actual_cols[std] = col
+                        break
+                if std in actual_cols:
+                    break
+
+        # Find the actual data rows (skip header rows)
+        data_start_idx = None
+        for idx, row in df.iterrows():
+            if pd.notna(row.get(actual_cols.get('txn_date', 'txn date'))) and pd.notna(row.get(actual_cols.get('description', 'description'))):
+                data_start_idx = idx
+                break
+        if data_start_idx is None:
+            return JsonResponse({'error': 'No valid transaction data found'}, status=400)
+        # Extract only the data rows
+        df = df.iloc[data_start_idx:].reset_index(drop=True)
+        print(f"Total rows in DataFrame: {len(df)}")
+        print(f"DataFrame columns: {list(df.columns)}")
+        print(f"First few rows:")
+        for i in range(min(5, len(df))):
+            print(f"  Row {i}: {dict(df.iloc[i])}")
+
+        transactions_created = 0
+        errors = []
+        from transactions.models import Transaction
+        
+        # Clear existing transactions for clean test
+        Transaction.objects.all().delete()
+        print(f"Cleared existing transactions. Starting to process {len(df)} rows...")
+        
+        for index, row in df.iterrows():
+            try:
+                # Get date - handle different date formats
+                date_val = row.get('Txn Date')
+                if pd.isna(date_val):
+                    print(f"Row {index + 1}: Skipping - no date")
+                    continue
+                
+                try:
+                    if isinstance(date_val, str):
+                        date = pd.to_datetime(date_val).date()
+                    else:
+                        date = date_val.date()
+                except Exception as e:
+                    print(f"Row {index + 1}: Date parsing error - {e}")
+                    continue
+                
+                # Get debit and credit amounts
+                debit_amount = row.get('Debit', 0)
+                credit_amount = row.get('Credit', 0)
+                
+                # Convert to float, handle NaN
+                try:
+                    debit_amount = float(debit_amount) if pd.notna(debit_amount) else 0.0
+                except:
+                    debit_amount = 0.0
+                    
+                try:
+                    credit_amount = float(credit_amount) if pd.notna(credit_amount) else 0.0
+                except:
+                    credit_amount = 0.0
+                
+                print(f"Row {index + 1}: Debit={debit_amount} Credit={credit_amount}")
+                
+                # Determine transaction type
+                if debit_amount > 0:
+                    transaction_type = 'Debit'
+                    amount = debit_amount
+                elif credit_amount > 0:
+                    transaction_type = 'Credit'
+                    amount = credit_amount
+                else:
+                    print(f"Row {index + 1}: Skipping - no amount")
+                    continue
+                
+                # Get description and reference
+                description = str(row.get('Description', ''))
+                ref_no = str(row.get('Ref No./Cheque No.', ''))
+                branch_code = str(row.get('Branch Code', ''))
+                balance = row.get('Balance', 0)
+                
+                print(f"Row {index + 1}: Saving {transaction_type} {amount} on {date}")
+                
+                # Create transaction
+                transaction = Transaction(
+                    date=date,
+                    type=transaction_type,
+                    amount=amount,
+                    category='Others',
+                    remarks=description,
+                    description=description,
+                    reference_number=ref_no,
+                    cheque_number=ref_no,
+                    branch_code=branch_code,
+                    balance=float(balance) if pd.notna(balance) else None,
+                    from_party='',
+                    to_party='',
+                    purpose=''
+                )
+                transaction.save()
+                transactions_created += 1
+                
+            except Exception as e:
+                print(f"Row {index + 1}: ERROR - {e}")
+                errors.append(f"Row {index + 1}: {str(e)}")
+        return JsonResponse({
+            'message': f'Successfully processed {transactions_created} transactions',
+            'transactions_created': transactions_created,
+            'errors': errors
+        })
+    except Exception as e:
+        return JsonResponse({'error': f'Error processing RELF data: {str(e)}'}, status=500)
+
+def process_standard_data(df):
+    """Process standard Excel/CSV format"""
+    try:
+        # Standard column mapping
+        column_mapping = {
+            'date': ['date', 'transaction date', 'txn date'],
+            'type': ['type', 'transaction type', 'credit/debit'],
+            'amount': ['amount', 'transaction amount', 'value'],
+            'category': ['category', 'transaction category', 'classification'],
+            'remarks': ['remarks', 'purpose', 'description'],
+            'from_party': ['from', 'from party', 'payer'],
+            'to_party': ['to', 'to party', 'payee'],
+            'reference_number': ['reference', 'ref no', 'reference number']
+        }
+        
+        # Rename columns to standard format
+        for standard_col, possible_names in column_mapping.items():
+            for old_col in possible_names:
+                if old_col in df.columns:
+                    df = df.rename(columns={old_col: standard_col})
+                    break
+        
+        # Validate required columns
+        required_columns = ['date', 'type', 'amount']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return JsonResponse({
+                'error': f'Missing required columns: {missing_columns}'
+            }, status=400)
+        
+        transactions_created = 0
+        errors = []
+        
+        for index, row in df.iterrows():
+            try:
+                # Parse date
+                if isinstance(row['date'], str):
+                    date = pd.to_datetime(row['date']).date()
+                else:
+                    date = row['date'].date()
+                
+                # Validate transaction type
+                transaction_type = row['type'].strip().title()
+                if transaction_type not in ['Credit', 'Debit']:
+                    errors.append(f"Row {index + 1}: Invalid transaction type '{transaction_type}'")
+                    continue
+                
+                # Parse amount
+                amount = float(row['amount'])
+                
+                # Get category (default to 'Others' if not provided)
+                category = row.get('category', 'Others')
+                if pd.isna(category):
+                    category = 'Others'
+                
+                # Create transaction
+                transaction = Transaction(
+                    date=date,
+                    type=transaction_type,
+                    amount=amount,
+                    category=category,
+                    remarks=row.get('remarks', ''),
+                    from_party=row.get('from_party', ''),
+                    to_party=row.get('to_party', ''),
+                    reference_number=row.get('reference_number', '')
+                )
+                transaction.save()
+                transactions_created += 1
+                
+            except Exception as e:
+                errors.append(f"Row {index + 1}: {str(e)}")
+        
+        return JsonResponse({
+            'message': f'Successfully processed {transactions_created} transactions',
+            'transactions_created': transactions_created,
+            'errors': errors
+        })
+        
+    except Exception as e:
+        return JsonResponse({'error': f'Error processing standard data: {str(e)}'}, status=500)
+
+@api_view(['GET'])
+def get_transactions(request):
+    try:
+        # Get filter parameters
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        transaction_type = request.GET.get('type')
+        category = request.GET.get('category')
+        
+        # Build query
+        queryset = Transaction.objects.all()
+        
+        if start_date:
+            queryset = queryset.filter(date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(date__lte=end_date)
+        if transaction_type:
+            queryset = queryset.filter(type=transaction_type)
+        if category:
+            queryset = queryset.filter(category=category)
+        
+        # Serialize data
+        serializer = TransactionSerializer(queryset, many=True)
+        return Response(serializer.data)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def get_analytics(request):
+    try:
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        queryset = Transaction.objects.all()
+        if start_date:
+            queryset = queryset.filter(date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(date__lte=end_date)
+        credit_data = queryset.filter(type='Credit')
+        debit_data = queryset.filter(type='Debit')
+        # By category (sum of amount)
+        credit_by_category = {}
+        for item in credit_data.values('category').annotate(total=Sum('amount')):
+            key = str(item['category']) if item['category'] else 'Unknown'
+            credit_by_category[key] = float(item['total'] or 0)
+        debit_by_category = {}
+        for item in debit_data.values('category').annotate(total=Sum('amount')):
+            key = str(item['category']) if item['category'] else 'Unknown'
+            debit_by_category[key] = float(item['total'] or 0)
+        # By month (sum of amount)
+        credit_by_month = {}
+        for item in credit_data.values('date').annotate(total=Sum('amount')):
+            if item['date']:
+                month = item['date'].strftime('%Y-%m')
+                credit_by_month[month] = credit_by_month.get(month, 0) + float(item['total'] or 0)
+        debit_by_month = {}
+        for item in debit_data.values('date').annotate(total=Sum('amount')):
+            if item['date']:
+                month = item['date'].strftime('%Y-%m')
+                debit_by_month[month] = debit_by_month.get(month, 0) + float(item['total'] or 0)
+        # By year (sum of amount)
+        credit_by_year = {}
+        for item in credit_data.values('date').annotate(total=Sum('amount')):
+            if item['date']:
+                year = str(item['date'].year)
+                credit_by_year[year] = credit_by_year.get(year, 0) + float(item['total'] or 0)
+        debit_by_year = {}
+        for item in debit_data.values('date').annotate(total=Sum('amount')):
+            if item['date']:
+                year = str(item['date'].year)
+                debit_by_year[year] = debit_by_year.get(year, 0) + float(item['total'] or 0)
+        analytics = {
+            'credit': {
+                'total': float(credit_data.aggregate(Sum('amount'))['amount__sum'] or 0),
+                'count': credit_data.count(),
+                'by_category': credit_by_category,
+                'by_month': credit_by_month,
+                'by_year': credit_by_year
+            },
+            'debit': {
+                'total': float(debit_data.aggregate(Sum('amount'))['amount__sum'] or 0),
+                'count': debit_data.count(),
+                'by_category': debit_by_category,
+                'by_month': debit_by_month,
+                'by_year': debit_by_year,
+                'by_category_type': {}
+            }
+        }
+        return Response(analytics)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def export_transactions(request):
+    try:
+        # Get filter parameters
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        transaction_type = request.GET.get('type')
+        category = request.GET.get('category')
+        export_format = request.GET.get('format', 'excel')
+        
+        # Build query
+        queryset = Transaction.objects.all()
+        
+        if start_date:
+            queryset = queryset.filter(date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(date__lte=end_date)
+        if transaction_type:
+            queryset = queryset.filter(type=transaction_type)
+        if category:
+            queryset = queryset.filter(category=category)
+        
+        # Serialize data
+        serializer = TransactionSerializer(queryset, many=True)
+        data = serializer.data
+        
+        if export_format == 'pdf':
+            return generate_pdf_report(data)
+        else:
+            return generate_excel_report(data)
+            
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+def generate_excel_report(data):
+    """Generate Excel report"""
+    try:
+        # Add Name column based on type
+        for item in data:
+            if item['type'] == 'Credit':
+                item['name'] = item.get('from_party', '')
+            else:
+                item['name'] = item.get('to_party', '')
+        # Create DataFrame
+        df = pd.DataFrame(data)
+        # Reorder columns to include Name after Category
+        columns = list(df.columns)
+        if 'name' in columns:
+            cols = ['date', 'type', 'amount', 'category', 'name', 'voucher_number', 'remarks']
+            df = df[[col for col in cols if col in df.columns]]
+        # Create Excel file in memory
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Transactions', index=False)
+        output.seek(0)
+        # Create response
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="transactions.xlsx"'
+        return response
+    except Exception as e:
+        return Response({'error': f'Error generating Excel: {str(e)}'}, status=500)
+
+def generate_pdf_report(data):
+    """Generate PDF report"""
+    try:
+        # Add Name column based on type
+        for item in data:
+            if item['type'] == 'Credit':
+                item['name'] = item.get('from_party', '')
+            else:
+                item['name'] = item.get('to_party', '')
+        # Create PDF in memory
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        elements = []
+        # Add title
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=30
+        )
+        elements.append(Paragraph("Transaction Report", title_style))
+        elements.append(Spacer(1, 12))
+        # Prepare table data
+        table_data = [['Date', 'Type', 'Amount', 'Category', 'Name', 'Voucher No.', 'Remarks']]
+        for item in data:
+            table_data.append([
+                item['date'],
+                item['type'],
+                str(item['amount']),
+                item['category'],
+                item.get('name', ''),
+                item['voucher_number'],
+                item.get('remarks', '')[:50] + '...' if item.get('remarks', '') and len(item.get('remarks', '')) > 50 else item.get('remarks', '')
+            ])
+        # Create table
+        table = Table(table_data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        elements.append(table)
+        doc.build(elements)
+        buffer.seek(0)
+        # Create response
+        from django.http import HttpResponse
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="transactions.pdf"'
+        return response
+    except Exception as e:
+        return Response({'error': f'Error generating PDF: {str(e)}'}, status=500)
+
+@api_view(['GET'])
+def export_chart_data(request):
+    try:
+        # Get filter parameters
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        
+        # Build query
+        queryset = Transaction.objects.all()
+        
+        if start_date:
+            queryset = queryset.filter(date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(date__lte=end_date)
+        
+        # Prepare chart data
+        chart_data = {
+            'credit_categories': {},
+            'debit_categories': {},
+            'monthly_trends': {},
+            'yearly_trends': {}
+        }
+        
+        # Process data
+        for transaction in queryset:
+            month = transaction.date.strftime('%Y-%m')
+            year = transaction.date.year
+            
+            if transaction.type == 'Credit':
+                if transaction.category not in chart_data['credit_categories']:
+                    chart_data['credit_categories'][transaction.category] = 0
+                chart_data['credit_categories'][transaction.category] += float(transaction.amount)
+            else:
+                if transaction.category not in chart_data['debit_categories']:
+                    chart_data['debit_categories'][transaction.category] = 0
+                chart_data['debit_categories'][transaction.category] += float(transaction.amount)
+            
+            # Monthly trends
+            if month not in chart_data['monthly_trends']:
+                chart_data['monthly_trends'][month] = {'credit': 0, 'debit': 0}
+            chart_data['monthly_trends'][month][transaction.type.lower()] += float(transaction.amount)
+            
+            # Yearly trends
+            if year not in chart_data['yearly_trends']:
+                chart_data['yearly_trends'][year] = {'credit': 0, 'debit': 0}
+            chart_data['yearly_trends'][year][transaction.type.lower()] += float(transaction.amount)
+        
+        return Response(chart_data)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+def test_view(request):
+    return HttpResponse("Test view is working!")
+
+def export_test(request):
+    print("==== export_test view called ====")
+    return HttpResponse("Export test endpoint is working!")

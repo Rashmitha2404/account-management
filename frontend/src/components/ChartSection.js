@@ -1,175 +1,349 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { Bar, Pie } from "react-chartjs-2";
-import { fetchStats } from "../api";
+import React, { useState, useEffect } from "react";
+import { getAnalytics } from "../api";
+import { Pie, Bar } from "react-chartjs-2";
+import {
+  Chart as ChartJS,
+  ArcElement,
+  Tooltip,
+  Legend,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+} from "chart.js";
 
-function groupByYear(stats) {
-  // Group monthly data by year for year-wise chart
-  if (!stats.monthly || !stats.monthly.labels || !stats.monthly.datasets) return { labels: [], datasets: [] };
-  const yearMap = {};
-  stats.monthly.labels.forEach((label, idx) => {
-    const year = label.split("-")[0];
-    if (!yearMap[year]) yearMap[year] = { Credits: 0, Debits: 0 };
-    stats.monthly.datasets.forEach(ds => {
-      if (ds.label === "Credits") yearMap[year].Credits += ds.data[idx] || 0;
-      if (ds.label === "Debits") yearMap[year].Debits += ds.data[idx] || 0;
-    });
-  });
-  return {
-    labels: Object.keys(yearMap),
-    datasets: [
-      {
-        label: "Credits",
-        data: Object.values(yearMap).map(y => y.Credits),
-        backgroundColor: "#36A2EB"
-      },
-      {
-        label: "Debits",
-        data: Object.values(yearMap).map(y => y.Debits),
-        backgroundColor: "#FF6384"
-      }
-    ]
-  };
-}
-
-const MONTHS = [
-  { value: "full", label: "Full Year" },
-  { value: "01", label: "January" },
-  { value: "02", label: "February" },
-  { value: "03", label: "March" },
-  { value: "04", label: "April" },
-  { value: "05", label: "May" },
-  { value: "06", label: "June" },
-  { value: "07", label: "July" },
-  { value: "08", label: "August" },
-  { value: "09", label: "September" },
-  { value: "10", label: "October" },
-  { value: "11", label: "November" },
-  { value: "12", label: "December" },
-];
-
-function getMonthRange(year, month) {
-  if (month === "full") {
-    return {
-      start_date: `${year}-01-01`,
-      end_date: `${year}-12-31`,
-    };
-  }
-  const start_date = `${year}-${month}-01`;
-  // Get last day of month
-  const end = new Date(year, parseInt(month), 0).getDate();
-  const end_date = `${year}-${month}-${end}`;
-  return { start_date, end_date };
-}
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
 
 function ChartSection() {
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const [selectedMonth, setSelectedMonth] = useState("full");
-  const [selectedYear, setSelectedYear] = useState(currentYear);
-  const [stats, setStats] = useState({
-    creditCategories: { labels: [], datasets: [] },
-    debitCategories: { labels: [], datasets: [] },
-    monthly: { labels: [], datasets: [] }
-  });
-  const [loading, setLoading] = useState(false);
-  const [view, setView] = useState("month");
-  const yearData = useMemo(() => groupByYear(stats), [stats]);
+  const [analytics, setAnalytics] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [viewType, setViewType] = useState('monthly'); // monthly or yearly
+  const [chartType, setChartType] = useState('pie'); // pie or bar
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
 
   useEffect(() => {
-    async function loadStats() {
-      setLoading(true);
-      try {
-        let filters = {};
-        if (selectedMonth !== "full") {
-          filters = getMonthRange(selectedYear, selectedMonth);
-        } else {
-          filters = getMonthRange(selectedYear, "full");
-        }
-        const data = await fetchStats(filters);
-        setStats(data);
-      } catch (error) {
-        setStats({
-          creditCategories: { labels: [], datasets: [] },
-          debitCategories: { labels: [], datasets: [] },
-          monthly: { labels: [], datasets: [] }
-        });
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadStats();
-  }, [selectedMonth, selectedYear]);
+    fetchAnalytics();
+    // eslint-disable-next-line
+  }, [year, month, viewType]);
 
-  // Generate year options (last 5 years)
-  const yearOptions = [];
-  for (let y = currentYear; y >= currentYear - 4; y--) {
-    yearOptions.push(y);
+  const fetchAnalytics = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const startDate = viewType === 'monthly' 
+        ? `${year}-${month.toString().padStart(2, '0')}-01`
+        : `${year}-01-01`;
+      const endDate = viewType === 'monthly'
+        ? `${year}-${month.toString().padStart(2, '0')}-${new Date(year, month, 0).getDate()}`
+        : `${year}-12-31`;
+
+      const data = await getAnalytics({
+        start_date: startDate,
+        end_date: endDate,
+        view_type: viewType
+      });
+      
+      setAnalytics(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper to create chart data
+  const getPieData = (data, label) => ({
+    labels: Object.keys(data),
+    datasets: [
+      {
+        label,
+        data: Object.values(data),
+        backgroundColor: [
+          '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#C9CBCF', '#28a745', '#dc3545', '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#343a40', '#adb5bd', '#ffc107', '#17a2b8', '#6610f2', '#f8f9fa', '#343a40'
+        ],
+        borderWidth: 1,
+      },
+    ],
+  });
+
+  const getBarData = (data, label) => ({
+    labels: Object.keys(data),
+    datasets: [
+      {
+        label,
+        data: Object.values(data),
+        backgroundColor: '#36A2EB',
+      },
+    ],
+  });
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: '20px' }}>
+        Loading analytics...
+      </div>
+    );
   }
 
+  if (error) {
+    return (
+      <div style={{ 
+        textAlign: 'center', 
+        padding: '20px',
+        color: '#dc3545'
+      }}>
+        Error loading analytics: {error}
+      </div>
+    );
+  }
+
+  // Pie/Bar chart rendering
+  const renderChart = (data, title, type = 'pie') => {
+    if (!data || Object.keys(data).length === 0) {
+      return (
+        <div style={{ 
+          textAlign: 'center', 
+          padding: '20px',
+          color: '#666',
+          fontStyle: 'italic'
+        }}>
+          No data available for {title}
+        </div>
+      );
+    }
+    if (type === 'pie') {
+      return <Pie data={getPieData(data, title)} options={{ plugins: { legend: { position: 'bottom' } } }} />;
+    } else {
+      return <Bar data={getBarData(data, title)} options={{ plugins: { legend: { display: false } }, responsive: true, scales: { y: { beginAtZero: true } } }} />;
+    }
+  };
+
+  const creditColors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#FF6384'];
+  const debitColors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'];
+  const capxOpxColors = ['#28a745', '#dc3545']; // Green for CAPX, Red for OPX
+
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "center", gap: 16, marginBottom: 24 }}>
-        <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} style={{ padding: '0.5rem', borderRadius: 6 }}>
-          {yearOptions.map(y => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
-        <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={{ padding: '0.5rem', borderRadius: 6 }}>
-          {MONTHS.map(m => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
-        <button
-          style={{
-            background: view === "month" ? "#2563eb" : "#f1f5f9",
-            color: view === "month" ? "#fff" : "#222",
-            border: "none",
-            borderRadius: 8,
-            padding: "0.5rem 1.2rem",
-            fontWeight: 600,
-            cursor: "pointer",
-            boxShadow: view === "month" ? "0 2px 6px rgba(37,99,235,0.08)" : "none",
-            transition: "background 0.2s"
-          }}
-          onClick={() => setView("month")}
-        >
-          Month-wise
-        </button>
-        <button
-          style={{
-            background: view === "year" ? "#2563eb" : "#f1f5f9",
-            color: view === "year" ? "#fff" : "#222",
-            border: "none",
-            borderRadius: 8,
-            padding: "0.5rem 1.2rem",
-            fontWeight: 600,
-            cursor: "pointer",
-            boxShadow: view === "year" ? "0 2px 6px rgba(37,99,235,0.08)" : "none",
-            transition: "background 0.2s"
-          }}
-          onClick={() => setView("year")}
-        >
-          Year-wise
-        </button>
+    <div className="chart-section" style={{
+      padding: '20px',
+      backgroundColor: 'white',
+      borderRadius: '8px',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      marginBottom: '20px'
+    }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '20px',
+        flexWrap: 'wrap',
+        gap: '10px'
+      }}>
+        <h2 style={{ margin: 0, color: '#333' }}>Analytics Dashboard</h2>
+        
+        <div style={{
+          display: 'flex',
+          gap: '10px',
+          alignItems: 'center',
+          flexWrap: 'wrap'
+        }}>
+          <select 
+            value={viewType} 
+            onChange={(e) => setViewType(e.target.value)}
+            style={{
+              padding: '8px',
+              borderRadius: '4px',
+              border: '1px solid #ddd',
+              fontSize: '14px'
+            }}
+          >
+            <option value="monthly">Monthly View</option>
+            <option value="yearly">Yearly View</option>
+          </select>
+
+          <select 
+            value={chartType} 
+            onChange={(e) => setChartType(e.target.value)}
+            style={{
+              padding: '8px',
+              borderRadius: '4px',
+              border: '1px solid #ddd',
+              fontSize: '14px'
+            }}
+          >
+            <option value="pie">Pie Chart</option>
+            <option value="bar">Bar Chart</option>
+          </select>
+
+          {viewType === 'monthly' ? (
+            <>
+              <select 
+                value={year} 
+                onChange={(e) => setYear(parseInt(e.target.value))}
+                style={{
+                  padding: '8px',
+                  borderRadius: '4px',
+                  border: '1px solid #ddd',
+                  fontSize: '14px'
+                }}
+              >
+                {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+              <select 
+                value={month} 
+                onChange={(e) => setMonth(parseInt(e.target.value))}
+                style={{
+                  padding: '8px',
+                  borderRadius: '4px',
+                  border: '1px solid #ddd',
+                  fontSize: '14px'
+                }}
+              >
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                  <option key={m} value={m}>
+                    {new Date(2024, m - 1).toLocaleDateString('en-US', { month: 'long' })}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : (
+            <select 
+              value={year} 
+              onChange={(e) => setYear(parseInt(e.target.value))}
+              style={{
+                padding: '8px',
+                borderRadius: '4px',
+                border: '1px solid #ddd',
+                fontSize: '14px'
+              }}
+            >
+              {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '20px' }}>Loading analytics...</div>
-      ) : (
-      <div className="charts">
-        <div>
-          <h3 style={{marginBottom: 8}}>Credit Categories</h3>
-          <Pie data={stats.creditCategories} />
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+        gap: '20px'
+      }}>
+        {/* Credit Categories */}
+        <div style={{
+          padding: '20px',
+          border: '1px solid #dee2e6',
+          borderRadius: '8px',
+          backgroundColor: '#f8f9fa'
+        }}>
+          {renderChart(
+            analytics?.credit?.by_category || {},
+            'Credit Categories',
+            chartType
+          )}
         </div>
-        <div>
-          <h3 style={{marginBottom: 8}}>Debit Categories</h3>
-          <Pie data={stats.debitCategories} />
+
+        {/* Debit Categories */}
+        <div style={{
+          padding: '20px',
+          border: '1px solid #dee2e6',
+          borderRadius: '8px',
+          backgroundColor: '#f8f9fa'
+        }}>
+          {renderChart(
+            analytics?.debit?.by_category || {},
+            'Debit Categories',
+            chartType
+          )}
         </div>
-        <div style={{width: '100%'}}>
-          <h3 style={{marginBottom: 8}}>{view === "month" ? "Month-wise Trends" : "Year-wise Trends"}</h3>
-          <Bar data={view === "month" ? stats.monthly : yearData} />
+
+        {/* CAPX vs OPX */}
+        <div style={{
+          padding: '20px',
+          border: '1px solid #dee2e6',
+          borderRadius: '8px',
+          backgroundColor: '#f8f9fa'
+        }}>
+          {renderChart(
+            analytics?.debit?.by_category_type || {},
+            'CAPX vs OPX (Debit Only)',
+            chartType
+          )}
+        </div>
+
+        {/* Monthly/Yearly Credit Trends */}
+        <div style={{
+          padding: '20px',
+          border: '1px solid #dee2e6',
+          borderRadius: '8px',
+          backgroundColor: '#f8f9fa'
+        }}>
+          {renderChart(
+            viewType === 'monthly' 
+              ? analytics?.credit?.by_month || {}
+              : analytics?.credit?.by_year || {},
+            `${viewType === 'monthly' ? 'Monthly' : 'Yearly'} Credit Trends`,
+            chartType
+          )}
+        </div>
+
+        {/* Monthly/Yearly Debit Trends */}
+        <div style={{
+          padding: '20px',
+          border: '1px solid #dee2e6',
+          borderRadius: '8px',
+          backgroundColor: '#f8f9fa'
+        }}>
+          {renderChart(
+            viewType === 'monthly'
+              ? analytics?.debit?.by_month || {}
+              : analytics?.debit?.by_year || {},
+            `${viewType === 'monthly' ? 'Monthly' : 'Yearly'} Debit Trends`,
+            chartType
+          )}
         </div>
       </div>
-      )}
+
+      {/* Summary Statistics */}
+      <div style={{
+        marginTop: '20px',
+        padding: '20px',
+        backgroundColor: '#e9ecef',
+        borderRadius: '8px',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '20px'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <h4 style={{ margin: '0 0 10px 0', color: '#28a745' }}>Total Credit</h4>
+          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#28a745' }}>
+            ₹{analytics?.credit?.total?.toLocaleString('en-IN') || '0'}
+          </div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <h4 style={{ margin: '0 0 10px 0', color: '#dc3545' }}>Total Debit</h4>
+          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc3545' }}>
+            ₹{analytics?.debit?.total?.toLocaleString('en-IN') || '0'}
+          </div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <h4 style={{ margin: '0 0 10px 0', color: '#28a745' }}>CAPX</h4>
+          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#28a745' }}>
+            ₹{analytics?.debit?.by_category_type?.CAPX?.toLocaleString('en-IN') || '0'}
+          </div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <h4 style={{ margin: '0 0 10px 0', color: '#dc3545' }}>OPX</h4>
+          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc3545' }}>
+            ₹{analytics?.debit?.by_category_type?.OPX?.toLocaleString('en-IN') || '0'}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import TransactionTable from "../components/TransactionTable";
 import ChartSection from "../components/ChartSection";
 import ExportButtons from "../components/ExportButtons";
 import Filters from "../components/Filters";
-import { uploadFile, fetchTransactions, fetchStats, exportExcel, exportPDF } from "../api";
+import { uploadFile, getTransactions, exportTransactions, exportChartData } from "../api";
 
 const DUMMY_CATEGORIES = [
   "Corpus", "CSR", "Grants", "Membership fees", "Loans", "Donation", "Others",
@@ -13,122 +13,132 @@ const DUMMY_CATEGORIES = [
 
 function Dashboard() {
   const [transactions, setTransactions] = useState([]);
-  const [filters, setFilters] = useState({ type: "", category: "", monthYear: "" });
-  const [stats, setStats] = useState({
-    creditCategories: { labels: [], datasets: [] },
-    debitCategories: { labels: [], datasets: [] },
-    monthly: { labels: [], datasets: [] }
-  });
-  const [uploadStatus, setUploadStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("");
+  const [filters, setFilters] = useState({
+    type: "",
+    category: "",
+    start_date: "",
+    end_date: ""
+  });
 
-  // Load transactions and stats on component mount
   useEffect(() => {
-    loadTransactions();
-    loadStats();
-  }, []);
-
-  // Load transactions when filters change
-  useEffect(() => {
-    loadTransactions();
+    fetchTransactions();
   }, [filters]);
 
-  const loadTransactions = async () => {
+  const fetchTransactions = async () => {
     try {
       setLoading(true);
-      const data = await fetchTransactions(filters);
+      // Do NOT include uploaded_at in filters for UI table
+      const data = await getTransactions(filters);
       setTransactions(data);
     } catch (error) {
-      console.error('Failed to load transactions:', error);
-      setUploadStatus(`Error loading transactions: ${error.message}`);
+      console.error('Error fetching transactions:', error);
+      setTransactions([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const loadStats = async () => {
-    try {
-      const data = await fetchStats();
-      setStats(data);
-    } catch (error) {
-      console.error('Failed to load stats:', error);
-      // Use fallback stats if API fails
-      setStats({
-        creditCategories: { labels: [], datasets: [] },
-        debitCategories: { labels: [], datasets: [] },
-        monthly: { labels: [], datasets: [] }
-      });
-    }
-  };
-
-  // Handle file upload to Django backend
   const handleUpload = async (file) => {
-    setUploadStatus("Uploading file to server...");
-    setLoading(true);
-    
     try {
+      setUploadStatus("Uploading file...");
       const result = await uploadFile(file);
-      setUploadStatus(`Success! ${result.created_count} transactions uploaded. ${result.errors.length > 0 ? `Errors: ${result.errors.join(', ')}` : ''}`);
-      
-      // Reload transactions and stats after successful upload
-      await loadTransactions();
-      await loadStats();
-      
+      setUploadStatus(`Successfully processed ${result.created_count || result.transactions_created} transactions!`);
+      // Refresh transactions after upload
+      await fetchTransactions();
     } catch (error) {
-      console.error('Upload failed:', error);
       setUploadStatus(`Upload failed: ${error.message}`);
-    } finally {
-      setLoading(false);
     }
   };
 
   const handleExportExcel = async () => {
     try {
-      setUploadStatus("Exporting to Excel...");
-      await exportExcel(filters);
-      setUploadStatus("Excel export completed!");
+      setUploadStatus("Exporting Excel file...");
+      await exportTransactions(filters, "excel");
+      setUploadStatus(""); // Clear status after download
     } catch (error) {
-      setUploadStatus(`Export failed: ${error.message}`);
+      setUploadStatus(`Excel export failed: ${error.message}`);
     }
   };
 
   const handleExportPDF = async () => {
     try {
-      setUploadStatus("Exporting to PDF...");
-      await exportPDF(filters);
-      setUploadStatus("PDF export completed!");
+      setUploadStatus("Exporting PDF file...");
+      await exportTransactions(filters, "pdf");
+      setUploadStatus(""); // Clear status after download
     } catch (error) {
-      setUploadStatus(`Export failed: ${error.message}`);
+      setUploadStatus(`PDF export failed: ${error.message}`);
     }
   };
 
-  const handleExportChart = () => {
-    // TODO: Implement chart export
-    setUploadStatus("Chart export feature coming soon!");
+  const handleExportChart = async () => {
+    try {
+      setUploadStatus("Exporting chart data...");
+      // Get current date range for chart export
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const filters = {
+        start_date: `${currentYear}-01-01`,
+        end_date: `${currentYear}-12-31`
+      };
+      await exportChartData(filters);
+      setUploadStatus("Chart data export completed!");
+    } catch (error) {
+      setUploadStatus(`Chart export failed: ${error.message}`);
+    }
   };
 
   return (
-    <div className="dashboard">
-      <h1>Account Management Dashboard</h1>
-      <div className="card">
+    <div className="dashboard" style={{
+      maxWidth: "1400px",
+      margin: "0 auto",
+      padding: "20px",
+      backgroundColor: "#f5f5f5",
+      minHeight: "100vh"
+    }}>
+      <h1 style={{
+        textAlign: "center",
+        color: "#333",
+        marginBottom: "30px",
+        fontSize: "2.5rem",
+        fontWeight: "bold"
+      }}>
+        Account Management Dashboard
+      </h1>
+      
+      <div className="card" style={{
+        backgroundColor: "white",
+        borderRadius: "8px",
+        padding: "20px",
+        marginBottom: "20px",
+        boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
+      }}>
         <FileUpload onUpload={handleUpload} />
         {uploadStatus && (
           <div style={{ 
-            marginTop: '10px', 
-            padding: '10px', 
-            borderRadius: '5px',
-            backgroundColor: uploadStatus.includes('Error') || uploadStatus.includes('failed') ? '#ffebee' : '#e8f5e8',
-            color: uploadStatus.includes('Error') || uploadStatus.includes('failed') ? '#c62828' : '#2e7d32'
+            marginTop: "10px", 
+            padding: "10px", 
+            borderRadius: "5px",
+            backgroundColor: uploadStatus.includes("Error") || uploadStatus.includes("failed") ? "#ffebee" : "#e8f5e8",
+            color: uploadStatus.includes("Error") || uploadStatus.includes("failed") ? "#c62828" : "#2e7d32"
           }}>
             {uploadStatus}
           </div>
         )}
       </div>
-      <div className="card">
+      
+      <div className="card" style={{
+        backgroundColor: "white",
+        borderRadius: "8px",
+        padding: "20px",
+        marginBottom: "20px",
+        boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
+      }}>
         <Filters filters={filters} setFilters={setFilters} />
-        <div className="card-table">
+        <div className="card-table" style={{ marginTop: "20px" }}>
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '20px' }}>
+            <div style={{ textAlign: "center", padding: "20px" }}>
               Loading transactions...
             </div>
           ) : (
@@ -136,10 +146,11 @@ function Dashboard() {
           )}
         </div>
       </div>
+      
       <div className="charts-section">
-        <h2>Analytics</h2>
         <ChartSection />
       </div>
+      
       <ExportButtons
         onExportExcel={handleExportExcel}
         onExportPDF={handleExportPDF}
