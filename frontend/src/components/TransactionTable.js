@@ -14,6 +14,23 @@ function TransactionTable({ transactions }) {
     );
   }
 
+  const headerStyle = {
+    padding: '12px 8px',
+    textAlign: 'left',
+    fontWeight: 'bold',
+    fontSize: '14px',
+    color: '#495057'
+  };
+  const cellStyle = {
+    padding: '12px 8px',
+    fontSize: '14px',
+    color: '#495057',
+    maxWidth: '200px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  };
+
   return (
     <div className="transaction-table">
       <table style={{
@@ -29,161 +46,40 @@ function TransactionTable({ transactions }) {
             backgroundColor: '#f8f9fa',
             borderBottom: '2px solid #dee2e6'
           }}>
-            <th style={{
-              padding: '12px 8px',
-              textAlign: 'left',
-              fontWeight: 'bold',
-              fontSize: '14px',
-              color: '#495057'
-            }}>Date</th>
-            <th style={{
-              padding: '12px 8px',
-              textAlign: 'left',
-              fontWeight: 'bold',
-              fontSize: '14px',
-              color: '#495057'
-            }}>Type</th>
-            <th style={{
-              padding: '12px 8px',
-              textAlign: 'right',
-              fontWeight: 'bold',
-              fontSize: '14px',
-              color: '#495057'
-            }}>Amount</th>
-            <th style={{
-              padding: '12px 8px',
-              textAlign: 'left',
-              fontWeight: 'bold',
-              fontSize: '14px',
-              color: '#495057'
-            }}>Category</th>
-            <th style={{
-              padding: '12px 8px',
-              textAlign: 'left',
-              fontWeight: 'bold',
-              fontSize: '14px',
-              color: '#495057'
-            }}>Name</th>
-            <th style={{
-              padding: '12px 8px',
-              textAlign: 'left',
-              fontWeight: 'bold',
-              fontSize: '14px',
-              color: '#495057'
-            }}>Voucher No.</th>
-            <th style={{
-              padding: '12px 8px',
-              textAlign: 'left',
-              fontWeight: 'bold',
-              fontSize: '14px',
-              color: '#495057'
-            }}>Description</th>
-            <th style={{
-              padding: '12px 8px',
-              textAlign: 'left',
-              fontWeight: 'bold',
-              fontSize: '14px',
-              color: '#495057'
-            }}>Reference</th>
-            <th style={{
-              padding: '12px 8px',
-              textAlign: 'left',
-              fontWeight: 'bold',
-              fontSize: '14px',
-              color: '#495057'
-            }}>Category Type</th>
+            <th style={headerStyle}>Date</th>
+            <th style={headerStyle}>Type</th>
+            <th style={headerStyle}>Amount</th>
+            <th style={headerStyle}>Category</th>
+            <th style={headerStyle}>Purpose</th>
+            <th style={headerStyle}>Payee/Recipient</th>
+            <th style={headerStyle}>Voucher No.</th>
+            <th style={headerStyle}>Description</th>
+            <th style={headerStyle}>Cheque/Ref No.</th>
+            <th style={headerStyle}>Branch Code</th>
+            <th style={headerStyle}>Balance</th>
+            <th style={headerStyle}>Category Type</th>
           </tr>
         </thead>
         <tbody>
           {transactions.map((transaction, index) => (
-            <tr key={transaction.id} style={{
+            <tr key={transaction.id || index} style={{
               borderBottom: '1px solid #dee2e6',
               backgroundColor: index % 2 === 0 ? 'white' : '#f8f9fa'
             }}>
-              <td style={{
-                padding: '12px 8px',
-                fontSize: '14px',
-                color: '#495057'
-              }}>
-                {new Date(transaction.date).toLocaleDateString()}
+              <td style={cellStyle}>{new Date(transaction.date).toLocaleDateString()}</td>
+              <td style={{...cellStyle, color: transaction.type === 'Credit' ? '#28a745' : '#dc3545', fontWeight: 'bold'}}>{transaction.type}</td>
+              <td style={{...cellStyle, textAlign: 'right', fontWeight: 'bold', color: transaction.type === 'Credit' ? '#28a745' : '#dc3545'}}>
+                ₹{parseFloat(transaction.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </td>
-              <td style={{
-                padding: '12px 8px',
-                fontSize: '14px',
-                color: transaction.type === 'Credit' ? '#28a745' : '#dc3545',
-                fontWeight: 'bold'
-              }}>
-                {transaction.type}
-              </td>
-              <td style={{
-                padding: '12px 8px',
-                textAlign: 'right',
-                fontSize: '14px',
-                fontWeight: 'bold',
-                color: transaction.type === 'Credit' ? '#28a745' : '#dc3545'
-              }}>
-                ₹{parseFloat(transaction.amount).toLocaleString('en-IN', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2
-                })}
-              </td>
-              <td style={{
-                padding: '12px 8px',
-                fontSize: '14px',
-                color: '#495057',
-                maxWidth: '200px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}>
-                {transaction.category}
-              </td>
-              <td style={{
-                padding: '12px 8px',
-                fontSize: '14px',
-                color: '#495057',
-                maxWidth: '200px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}>
-                {transaction.name}
-              </td>
-              <td style={{
-                padding: '12px 8px',
-                fontSize: '14px',
-                color: '#495057',
-                fontFamily: 'monospace',
-                fontWeight: 'bold'
-              }}>
-                {transaction.voucher_number}
-              </td>
-              <td style={{
-                padding: '12px 8px',
-                fontSize: '14px',
-                color: '#495057',
-                maxWidth: '250px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}>
-                {transaction.remarks || transaction.description || '-'}
-              </td>
-              <td style={{
-                padding: '12px 8px',
-                fontSize: '14px',
-                color: '#495057',
-                fontFamily: 'monospace'
-              }}>
-                {transaction.reference_number || transaction.cheque_number || '-'}
-              </td>
-              <td style={{
-                padding: '12px 8px',
-                fontSize: '14px',
-                color: '#495057'
-              }}>
-                {transaction.category_type || '-'}
-              </td>
+              <td style={cellStyle}>{transaction.category}</td>
+              <td style={cellStyle}>{transaction.purpose || '-'}</td>
+              <td style={cellStyle}>{transaction.payee_recipient_name || transaction.name || '-'}</td>
+              <td style={{...cellStyle, fontFamily: 'monospace', fontWeight: 'bold'}}>{transaction.voucher_number}</td>
+              <td style={cellStyle}>{transaction.remarks || transaction.description || '-'}</td>
+              <td style={cellStyle}>{transaction.cheque_number || transaction.reference_number || '-'}</td>
+              <td style={cellStyle}>{transaction.branch_code || '-'}</td>
+              <td style={cellStyle}>{transaction.balance !== undefined && transaction.balance !== null ? `₹${parseFloat(transaction.balance).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}</td>
+              <td style={cellStyle}>{transaction.category_type || '-'}</td>
             </tr>
           ))}
         </tbody>

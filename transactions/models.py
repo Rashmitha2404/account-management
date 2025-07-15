@@ -19,6 +19,59 @@ class Transaction(models.Model):
         ('Others', 'Others'),
     ]
     
+    # Purpose choices for transactions
+    PURPOSE_CHOICES = [
+        ('Salary Payment', 'Salary Payment'),
+        ('Office Rent', 'Office Rent'),
+        ('Equipment Purchase', 'Equipment Purchase'),
+        ('Transport Expenses', 'Transport Expenses'),
+        ('Stationary Purchase', 'Stationary Purchase'),
+        ('Training Expenses', 'Training Expenses'),
+        ('Maintenance', 'Maintenance'),
+        ('Utility Bills', 'Utility Bills'),
+        ('Insurance', 'Insurance'),
+        ('Legal Fees', 'Legal Fees'),
+        ('Audit Fees', 'Audit Fees'),
+        ('Marketing Expenses', 'Marketing Expenses'),
+        ('Travel Expenses', 'Travel Expenses'),
+        ('Food & Refreshments', 'Food & Refreshments'),
+        ('Grant Received', 'Grant Received'),
+        ('Donation Received', 'Donation Received'),
+        ('Membership Fees', 'Membership Fees'),
+        ('Loan Repayment', 'Loan Repayment'),
+        ('Investment Income', 'Investment Income'),
+        ('Other Income', 'Other Income'),
+        ('Other Expenses', 'Other Expenses'),
+    ]
+    
+    # Payee/Recipient choices
+    PAYEE_RECIPIENT_CHOICES = [
+        ('Staff', 'Staff'),
+        ('Employees', 'Employees'),
+        ('Contractors', 'Contractors'),
+        ('Suppliers', 'Suppliers'),
+        ('Vendors', 'Vendors'),
+        ('Government', 'Government'),
+        ('Corporate', 'Corporate'),
+        ('Individuals', 'Individuals'),
+        ('Banks', 'Banks'),
+        ('Insurance Companies', 'Insurance Companies'),
+        ('Utility Companies', 'Utility Companies'),
+        ('Transport Services', 'Transport Services'),
+        ('Training Institutes', 'Training Institutes'),
+        ('Audit Firms', 'Audit Firms'),
+        ('Legal Firms', 'Legal Firms'),
+        ('Marketing Agencies', 'Marketing Agencies'),
+        ('Hotels', 'Hotels'),
+        ('Restaurants', 'Restaurants'),
+        ('Equipment Suppliers', 'Equipment Suppliers'),
+        ('Stationary Suppliers', 'Stationary Suppliers'),
+        ('Members', 'Members'),
+        ('Donors', 'Donors'),
+        ('Investors', 'Investors'),
+        ('Others', 'Others'),
+    ]
+    
     # Debit categories - Updated structure
     DEBIT_CATEGORIES = [
         # Programmatic Domains
@@ -93,8 +146,8 @@ class Transaction(models.Model):
     reference_number = models.CharField(max_length=100, blank=True, null=True)
     
     # New fields for enhanced requirements
-    purpose = models.TextField(blank=True, null=True, help_text="Purpose of transaction")
-    payee_recipient_name = models.CharField(max_length=200, blank=True, null=True, help_text="Payee/Recipient Name")
+    purpose = models.CharField(max_length=100, choices=PURPOSE_CHOICES, blank=True, null=True, help_text="Purpose of transaction")
+    payee_recipient_name = models.CharField(max_length=200, blank=True, null=True, help_text="Payee/Recipient Name (actual person name)")
     value_date = models.DateField(blank=True, null=True, help_text="Value Date from bank statement")
     description = models.TextField(blank=True, null=True, help_text="Description from bank statement")
     cheque_number = models.CharField(max_length=50, blank=True, null=True, help_text="Cheque/Reference Number")

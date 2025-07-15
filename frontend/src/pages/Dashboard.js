@@ -55,10 +55,21 @@ function Dashboard() {
   const handleExportExcel = async () => {
     try {
       setUploadStatus("Exporting Excel file...");
-      await exportTransactions(filters, "excel");
+      await exportTransactions(); // Export all
       setUploadStatus(""); // Clear status after download
     } catch (error) {
       setUploadStatus(`Excel export failed: ${error.message}`);
+    }
+  };
+
+  const handleExportFiltered = async () => {
+    try {
+      setUploadStatus("Exporting filtered Excel file...");
+      console.log("Exporting with filters:", filters); // <-- Add this line
+      await exportTransactions(filters, "excel"); // Export filtered
+      setUploadStatus("");
+    } catch (error) {
+      setUploadStatus(`Filtered Excel export failed: ${error.message}`);
     }
   };
 
@@ -153,6 +164,7 @@ function Dashboard() {
       
       <ExportButtons
         onExportExcel={handleExportExcel}
+        onExportFiltered={handleExportFiltered}
         onExportPDF={handleExportPDF}
         onExportChart={handleExportChart}
       />

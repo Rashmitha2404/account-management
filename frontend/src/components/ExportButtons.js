@@ -1,6 +1,6 @@
 import React from "react";
 
-function ExportButtons({ onExportExcel, onExportPDF }) {
+function ExportButtons({ onExportExcel, onExportFiltered, onExportPDF, onExportChart }) {
   return (
     <div className="export-buttons" style={{
       display: 'flex',
@@ -19,7 +19,35 @@ function ExportButtons({ onExportExcel, onExportPDF }) {
           alignItems: 'center',
           gap: '8px',
           padding: '12px 20px',
-          backgroundColor: '#10b981',
+          backgroundColor: '#2563eb', // blue
+          color: 'white',
+          border: 'none',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontWeight: '600',
+          fontSize: '14px',
+          transition: 'all 0.2s ease',
+          boxShadow: '0 2px 4px rgba(37,99,235,0.08)'
+        }}
+        onMouseEnter={(e) => {
+          e.target.style.backgroundColor = '#1d4ed8';
+          e.target.style.transform = 'translateY(-1px)';
+        }}
+        onMouseLeave={(e) => {
+          e.target.style.backgroundColor = '#2563eb';
+          e.target.style.transform = 'translateY(0)';
+        }}
+      >
+        📊 Export All
+      </button>
+      <button
+        onClick={onExportFiltered}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '12px 20px',
+          backgroundColor: '#10b981', // green
           color: 'white',
           border: 'none',
           borderRadius: '6px',
@@ -38,9 +66,8 @@ function ExportButtons({ onExportExcel, onExportPDF }) {
           e.target.style.transform = 'translateY(0)';
         }}
       >
-        📊 Export Excel
+        🟢 Export Filtered
       </button>
-      
       <button 
         onClick={onExportPDF}
         style={{
@@ -68,6 +95,34 @@ function ExportButtons({ onExportExcel, onExportPDF }) {
         }}
       >
         📄 Export PDF
+      </button>
+      <button 
+        onClick={onExportChart}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '12px 20px',
+          backgroundColor: '#8b5cf6',
+          color: 'white',
+          border: 'none',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontWeight: '600',
+          fontSize: '14px',
+          transition: 'all 0.2s ease',
+          boxShadow: '0 2px 4px rgba(139, 92, 246, 0.2)'
+        }}
+        onMouseEnter={(e) => {
+          e.target.style.backgroundColor = '#7c3aed';
+          e.target.style.transform = 'translateY(-1px)';
+        }}
+        onMouseLeave={(e) => {
+          e.target.style.backgroundColor = '#8b5cf6';
+          e.target.style.transform = 'translateY(0)';
+        }}
+      >
+        📈 Export Charts
       </button>
     </div>
   );
