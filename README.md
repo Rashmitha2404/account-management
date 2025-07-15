@@ -2,6 +2,16 @@
 
 A comprehensive accounting management system with Excel/CSV file upload, transaction management, analytics, and export capabilities. The system supports RELF account data format and enhanced categorization with CAPX/OPX classification.
 
+## Setup & Running the App
+
+- **Quick Start:**
+  - Double-click `start_app.bat` to launch both the backend and frontend servers. The script now works from any folder location—no hardcoded paths required.
+  - Backend: http://127.0.0.1:8000
+  - Frontend: http://localhost:3000
+- For manual setup or advanced usage, see the detailed instructions below.
+
+> **Note:** The backend uses **SQLite** by default. No additional database setup is required. The database file (`db.sqlite3`) will be created automatically. If you wish to use another database (like PostgreSQL), see the comment in `accounting_backend/settings.py`.
+
 ## Features
 
 ### 📊 Data Management
@@ -131,7 +141,7 @@ The system now supports RELF account data format with these columns:
    install_dependencies.bat
    ```
 
-2. Run Django migrations:
+2. Run Django migrations (this will create the SQLite database file automatically):
    ```bash
    python manage.py migrate
    ```
